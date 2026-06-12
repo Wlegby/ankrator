@@ -1,0 +1,11 @@
+[package]
+name = "ankrator"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anker = { version = "0.1.0", path = "../anker" }
+dirs = "6.0.0"
+rparse = { version = "0.1.0", path = "../rparse" }
+serde_json = "1.0.150"
+tokio = { version = "1.52.3", features = ["macros", "rt-multi-thread"] }
