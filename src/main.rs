@@ -1,9 +1,12 @@
 use anker::markdown::markdown_to_anki_with_typst;
 use anker::notes::{format_cloze, Note};
-use anker::AnkiClient;
+use anker::{client, AnkiClient};
+use futures::future::BoxFuture;
+use futures::FutureExt;
 use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::BufWriter;
+use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 mod parse_file;
@@ -15,14 +18,38 @@ use crate::parse_file::{Parts, Types};
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client = AnkiClient::default();
 
-    let path = "input".to_string();
-    let content = fs::read_to_string(&path)?;
-    match handle_file(&content, path, &client).await {
-        Ok(_) => {}
-        Err(e) => eprintln!("Failed to handle file:\n{}", e),
-    }
+    traverse(&client, Path::new(".")).await?;
 
     Ok(())
+}
+
+fn traverse<'a>(
+    client: &'a AnkiClient,
+    path: &'a Path,
+) -> BoxFuture<'a, Result<(), Box<dyn std::error::Error>>> {
+    async move {
+        if path.is_dir() {
+            for entry in fs::read_dir(path)? {
+                let entry = entry?;
+                let path = entry.path();
+
+                if path.is_dir() {
+                    traverse(client, &path).await?;
+                } else if let Some(ex) = path.extension() {
+                    if ex != "ak" {
+                        continue;
+                    }
+                    let content = fs::read_to_string(&path)?;
+                    match handle_file(&content, path.to_string_lossy().to_string(), &client).await {
+                        Ok(_) => {}
+                        Err(e) => eprintln!("Failed to handle file:\n{}", e),
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+    .boxed()
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -71,31 +98,53 @@ fn file_changed<'a>(path: &str) -> Result<bool, Box<dyn std::error::Error>> {
 
         let cache = fs::read_to_string(&dir)?;
 
+        let map: HashMap<String, SystemTime> = serde_json::from_str(&cache)?;
+
+        let last_time = match map.get(path) {
+            Some(last_time) => *last_time,
+            None => SystemTime::now(),
+        };
+
+        let metadata = fs::metadata(path)?;
+        let modified_time: SystemTime = metadata.modified().unwrap();
+
+        Ok(modified_time > last_time)
+    } else {
+        eprint!("Failed to get cache dir");
+        Ok(true)
+    }
+}
+
+fn add_cache(path: &str) -> Result<(), Box<dyn std::error::Error>> {
+    if let Some(mut dir) = dirs::cache_dir() {
+        dir = dir.join("ankrator");
+        fs::create_dir_all(&dir)?;
+        dir = dir.join("cache.json");
+
+        if !dir.exists() {
+            fs::write(&dir, "{}")?;
+        }
+
+        let cache = fs::read_to_string(&dir)?;
+
         let mut map: HashMap<String, SystemTime> = serde_json::from_str(&cache)?;
 
-        let last_time = match map.get_mut(path) {
+        match map.get_mut(path) {
             Some(last_time) => {
-                let _return = last_time.clone();
                 *last_time = SystemTime::now();
-                _return
             }
             None => {
                 map.insert(path.to_string(), SystemTime::now());
-                SystemTime::now()
             }
-        };
+        }
 
         let file = File::create(&dir)?;
         let writer = BufWriter::new(file);
         serde_json::to_writer_pretty(writer, &map)?;
 
-        let metadata = fs::metadata(path)?;
-        let modified_time: SystemTime = metadata.modified().unwrap();
-
-        Ok(modified_time < last_time)
+        Ok(())
     } else {
-        eprint!("Failed to get cache dir");
-        Ok(true)
+        Err("Failed to get cache dir".into())
     }
 }
 
@@ -173,7 +222,7 @@ async fn handle_parts<'a>(
             Parts::CardEnd(cid) => {
                 let id = match cid {
                     Some(i) => {
-                        new_file.push_str(&format!("---NoteID:{}\n", i));
+                        new_file.push_str(&format!("---NoteID:{}\n\n", i));
                         let parsed = match i.trim().parse::<i64>() {
                             Ok(i) => i,
                             Err(e) => return Err(e.into()),
@@ -212,7 +261,7 @@ async fn handle_parts<'a>(
                 };
 
                 let id = client.notes().add_note(&note).await?;
-                new_file.push_str(&format!("---NoteID:{}\n", id));
+                new_file.push_str(&format!("---NoteID:{}\n\n", id));
                 card_type = CardType::default();
             }
             Parts::Comment(c) => {
@@ -220,6 +269,8 @@ async fn handle_parts<'a>(
             }
         }
     }
+
+    add_cache(&path)?;
 
     fs::write(path, new_file)?;
     Ok(())
