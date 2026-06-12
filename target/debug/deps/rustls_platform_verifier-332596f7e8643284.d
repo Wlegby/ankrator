@@ -1,8 +1,0 @@
-/home/alberic/Programming/Rust/OwnRust/ankrator/target/debug/deps/rustls_platform_verifier-332596f7e8643284.d: /home/alberic/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rustls-platform-verifier-0.7.0/src/lib.rs /home/alberic/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rustls-platform-verifier-0.7.0/src/verification/mod.rs /home/alberic/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rustls-platform-verifier-0.7.0/src/verification/others.rs /home/alberic/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rustls-platform-verifier-0.7.0/src/../README.md
-
-/home/alberic/Programming/Rust/OwnRust/ankrator/target/debug/deps/librustls_platform_verifier-332596f7e8643284.rmeta: /home/alberic/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rustls-platform-verifier-0.7.0/src/lib.rs /home/alberic/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rustls-platform-verifier-0.7.0/src/verification/mod.rs /home/alberic/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rustls-platform-verifier-0.7.0/src/verification/others.rs /home/alberic/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rustls-platform-verifier-0.7.0/src/../README.md
-
-/home/alberic/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rustls-platform-verifier-0.7.0/src/lib.rs:
-/home/alberic/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rustls-platform-verifier-0.7.0/src/verification/mod.rs:
-/home/alberic/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rustls-platform-verifier-0.7.0/src/verification/others.rs:
-/home/alberic/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rustls-platform-verifier-0.7.0/src/../README.md:

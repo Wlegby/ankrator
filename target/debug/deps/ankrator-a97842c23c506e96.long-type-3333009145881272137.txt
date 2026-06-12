@@ -1,1 +1,0 @@
-rparse::Map<impl Parser<'_, ()>, {closure@src/parse_file.rs:37:24: 37:27}, ()>: Parser<'a, Parts<'a>>
