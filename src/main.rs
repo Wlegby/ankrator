@@ -1,12 +1,12 @@
 use anker::markdown::markdown_to_anki_with_typst;
 use anker::notes::{format_cloze, Note};
-use anker::{client, AnkiClient};
+use anker::AnkiClient;
 use futures::future::BoxFuture;
 use futures::FutureExt;
 use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::BufWriter;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::SystemTime;
 
 mod parse_file;
