@@ -100,9 +100,11 @@ fn file_changed<'a>(path: &str) -> Result<bool, Box<dyn std::error::Error>> {
 
         let map: HashMap<String, SystemTime> = serde_json::from_str(&cache)?;
 
-        let last_time = match map.get(path) {
-            Some(last_time) => *last_time,
-            None => SystemTime::now(),
+        let last_time: SystemTime;
+
+        match map.get(path) {
+            Some(ltime) => last_time = *ltime,
+            None => return Ok(true),
         };
 
         let metadata = fs::metadata(path)?;

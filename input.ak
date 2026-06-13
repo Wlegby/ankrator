@@ -1,7 +1,9 @@
 @deck Default
 @tags anki, other
 
+
 # Basic
+
 Front: *term* __some__ $f(a) = vec(1, 2, 3)$
 Back: _definition_
 $$
@@ -11,7 +13,5 @@ $$
 
 # Cloze
 Cloze: this is a {{cloze}} style thing
-
-
 ---
 
