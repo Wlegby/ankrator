@@ -1,6 +1,6 @@
-use rparse::{literal, split_at, take_until, take_while, Parser};
+use rparse::{literal, split_at, take_until, Parser};
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum Parts<'a> {
     DeckName(&'a str),
     Tags(Vec<&'a str>),
@@ -8,11 +8,11 @@ pub enum Parts<'a> {
     Front(&'a str),
     Back(&'a str),
     ClozeLine(&'a str),
-    CardEnd(Option<&'a str>),
+    CardEnd,
     Comment(&'a str),
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug)]
 pub enum Types {
     Basic,
     Cloze,
@@ -34,14 +34,7 @@ pub fn parse_tags<'a>() -> impl Parser<'a, Parts<'a>> {
         })
 }
 pub fn parse_card_end<'a>() -> impl Parser<'a, Parts<'a>> {
-    literal("---")
-        .and((literal("NoteID:").and(take_until(|c| c == '\n' || c == '\r'))).opt())
-        .map(|(_, id)| {
-            Parts::CardEnd(match id {
-                Some((_, id)) => Some(id),
-                None => None,
-            })
-        })
+    literal("---").map(|_| Parts::CardEnd)
 }
 
 pub fn parse_card_type<'a>() -> impl Parser<'a, Parts<'a>> {
@@ -59,13 +52,13 @@ pub fn parse_card_type<'a>() -> impl Parser<'a, Parts<'a>> {
 pub fn parse_front<'a>() -> impl Parser<'a, Parts<'a>> {
     literal("Front: ")
         .and(split_at("Back:"))
-        .map(|(_, text)| Parts::Front(text.trim()))
+        .map(|(_, text)| Parts::Front(text))
 }
 
 pub fn parse_back<'a>() -> impl Parser<'a, Parts<'a>> {
     literal("Back: ")
         .and(split_at("---"))
-        .map(|(_, text)| Parts::Back(text.trim()))
+        .map(|(_, text)| Parts::Back(text))
 }
 
 pub fn parse_cloze<'a>() -> impl Parser<'a, Parts<'a>> {
@@ -76,7 +69,7 @@ pub fn parse_cloze<'a>() -> impl Parser<'a, Parts<'a>> {
 pub fn parse_comment<'a>() -> impl Parser<'a, Parts<'a>> {
     literal("//")
         .and(take_until(|c| c == '\n' || c == '\r'))
-        .map(|(_, c)| Parts::Comment(c))
+        .map(|(_, comment)| Parts::Comment(comment))
 }
 
 pub fn parse_file<'a>(mut input: &'a str) -> Result<Vec<Parts<'a>>, &'a str> {
@@ -91,13 +84,14 @@ pub fn parse_file<'a>(mut input: &'a str) -> Result<Vec<Parts<'a>>, &'a str> {
         .or(parse_card_end())
         .or(parse_comment());
 
-    let whitespace = take_while(|c| c == '\n' || c == '\r');
+    let whitespace = literal("\n").or(literal("\r")).or(literal("\r\n"));
 
     while !input.is_empty() {
         match whitespace.parse(input) {
             Ok(_) => input = input.trim(),
             Err(_) => {}
         }
+
         match parts_parser.parse(input) {
             Ok((rest, part)) => {
                 parts.push(part);
