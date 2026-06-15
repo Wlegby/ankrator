@@ -1,4 +1,4 @@
-use anker::markdown::markdown_to_anki_with_typst;
+use anker::markdown::{markdown_to_anki_with_typst, upload_media};
 use anker::notes::{format_cloze, Note, NoteUpdate};
 use anker::AnkiClient;
 use futures::future::BoxFuture;
@@ -275,15 +275,24 @@ async fn handle_parts<'a>(
                 let mut fields = HashMap::new();
                 let model_name = match card_type {
                     CardType::Cloze { text } => {
+                        let after_media_upload = upload_media(client, text).await?;
                         let _ = fields.insert(
                             "Text".to_string(),
-                            markdown_to_anki_with_typst(&format_cloze(text)),
+                            markdown_to_anki_with_typst(&format_cloze(&after_media_upload)),
                         );
                         "Cloze".to_string()
                     }
                     CardType::Basic { front, back } => {
-                        fields.insert("Front".to_string(), markdown_to_anki_with_typst(front));
-                        fields.insert("Back".to_string(), markdown_to_anki_with_typst(back));
+                        let front_uploaded = upload_media(client, front).await?;
+                        let back_uploaded = upload_media(client, back).await?;
+                        fields.insert(
+                            "Front".to_string(),
+                            markdown_to_anki_with_typst(&front_uploaded),
+                        );
+                        fields.insert(
+                            "Back".to_string(),
+                            markdown_to_anki_with_typst(&back_uploaded),
+                        );
                         "Basic".to_string()
                     }
                 };
