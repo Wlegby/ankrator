@@ -1,5 +1,5 @@
 use anker::markdown::markdown_to_anki_with_typst;
-use anker::notes::{format_cloze, Note};
+use anker::notes::{format_cloze, Note, NoteUpdate};
 use anker::AnkiClient;
 use futures::future::BoxFuture;
 use futures::FutureExt;
@@ -116,7 +116,7 @@ async fn handle_file<'a>(
     let mut parsed_file = parse_file(content)?;
 
     if parsed_file.is_empty() {
-        eprint!("File does not contain ankrator syntax");
+        eprint!("File does not contain ankrator items");
     }
 
     handle_parts(&mut parsed_file, path, client).await?;
@@ -292,7 +292,15 @@ async fn handle_parts<'a>(
                 let _ = client.decks().create_deck(deck).await?;
 
                 if let Some(id) = id {
-                    client.notes().update_note_fields(id, &fields).await?;
+                    let update = NoteUpdate {
+                        id,
+                        fields: Some(&fields),
+                        tags: Some(&tags.iter().map(|t| t.to_string()).collect::<Vec<String>>()),
+                    };
+
+                    client.notes().update_note(&update).await?;
+                    client.notes().update_note_deck(id, deck).await?;
+
                     continue;
                 }
 
