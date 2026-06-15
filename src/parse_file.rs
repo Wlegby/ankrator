@@ -22,7 +22,7 @@ pub enum Types {
 pub fn parse_deck<'a>() -> impl Parser<'a, Parts<'a>> {
     literal("@deck ")
         .and(take_until(|c| c == '\n' || c == '\r'))
-        .map(|(_, deck)| Parts::DeckName(deck))
+        .map(|(_, deck)| Parts::DeckName(deck.trim()))
 }
 
 pub fn parse_tags<'a>() -> impl Parser<'a, Parts<'a>> {
@@ -101,7 +101,7 @@ pub fn parse_file<'a>(mut input: &'a str) -> Result<Vec<Parts<'a>>, &'a str> {
         match parts_parser.parse(input) {
             Ok((rest, part)) => {
                 parts.push(part);
-                input = rest;
+                input = rest.trim();
             }
             Err(i) => return Err(i),
         }

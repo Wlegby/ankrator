@@ -4,6 +4,7 @@ use anker::AnkiClient;
 use futures::future::BoxFuture;
 use futures::FutureExt;
 use std::collections::HashMap;
+use std::env::args;
 use std::fs::{self, File};
 use std::io::BufWriter;
 use std::path::Path;
@@ -17,15 +18,37 @@ use crate::parse_file::{Parts, Types};
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client = AnkiClient::default();
+    let mut args = args();
+    args.next();
 
-    traverse(&client, Path::new(".")).await?;
+    let mut ignore_cache = false;
+    match args.next() {
+        Some(s) => {
+            if &s == "--no-cache" {
+                ignore_cache = true;
+            } else {
+                eprintln!(
+                    "Invalid argument {}\nonly --no-cache valid\n(continuing)",
+                    s
+                )
+            }
+        }
+        None => {}
+    }
 
+    let mut num_files = 0;
+
+    traverse(&client, Path::new("."), ignore_cache, &mut num_files).await?;
+
+    println!("Successfully handled {} file(s)", num_files);
     Ok(())
 }
 
 fn traverse<'a>(
     client: &'a AnkiClient,
     path: &'a Path,
+    no_cache: bool,
+    num: &'a mut u32,
 ) -> BoxFuture<'a, Result<(), Box<dyn std::error::Error>>> {
     async move {
         if path.is_dir() {
@@ -34,14 +57,21 @@ fn traverse<'a>(
                 let path = entry.path();
 
                 if path.is_dir() {
-                    traverse(client, &path).await?;
+                    traverse(client, &path, no_cache, num).await?;
                 } else if let Some(ex) = path.extension() {
                     if ex != "ak" {
                         continue;
                     }
                     let content = fs::read_to_string(&path)?;
-                    match handle_file(&content, path.to_string_lossy().to_string(), &client).await {
-                        Ok(_) => {}
+                    match handle_file(
+                        &content,
+                        path.to_string_lossy().to_string(),
+                        &client,
+                        no_cache,
+                    )
+                    .await
+                    {
+                        Ok(_) => *num += 1,
                         Err(e) => eprintln!("Failed to handle file:\n{}", e),
                     }
                 }
@@ -67,20 +97,28 @@ async fn handle_file<'a>(
     content: &'a str,
     path: String,
     client: &AnkiClient,
+    no_cache: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    match file_changed(&path) {
-        Ok(changed) => {
-            if !changed {
-                return Ok(());
+    if !no_cache {
+        match file_changed(&path) {
+            Ok(changed) => {
+                if !changed {
+                    return Ok(());
+                }
             }
+            Err(i) => eprintln!(
+                "Failed to check if file changed ({}), going to parse it anyways",
+                i
+            ),
         }
-        Err(i) => eprintln!(
-            "Failed to check if file changed ({}), going to parse it anyways",
-            i
-        ),
     }
 
     let mut parsed_file = parse_file(content)?;
+
+    if parsed_file.is_empty() {
+        eprint!("File does not contain ankrator syntax");
+    }
+
     handle_parts(&mut parsed_file, path, client).await?;
 
     Ok(())
@@ -158,6 +196,7 @@ async fn handle_parts<'a>(
     let mut card_type = CardType::Cloze { text: "" };
 
     let mut new_file = String::new();
+    let mut num_cards = 0;
 
     for part in parsed_file.iter_mut() {
         match part {
@@ -220,6 +259,7 @@ async fn handle_parts<'a>(
                 }
             },
             Parts::CardEnd(cid) => {
+                num_cards += 1;
                 let id = match cid {
                     Some(i) => {
                         new_file.push_str(&format!("---NoteID:{}\n\n", i));
@@ -248,6 +288,9 @@ async fn handle_parts<'a>(
                     }
                 };
 
+                //ensure deck exists
+                let _ = client.decks().create_deck(deck).await?;
+
                 if let Some(id) = id {
                     client.notes().update_note_fields(id, &fields).await?;
                     continue;
@@ -270,8 +313,12 @@ async fn handle_parts<'a>(
         }
     }
 
-    add_cache(&path)?;
+    if num_cards == 0 {
+        eprint!("{} Did not contain any cards", path);
+    } else {
+        add_cache(&path)?;
+    }
 
-    fs::write(path, new_file)?;
+    fs::write(&path, new_file)?;
     Ok(())
 }
