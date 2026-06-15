@@ -71,7 +71,7 @@ pub fn parse_back<'a>() -> impl Parser<'a, Parts<'a>> {
 pub fn parse_cloze<'a>() -> impl Parser<'a, Parts<'a>> {
     literal("Cloze: ")
         .and(split_at("---"))
-        .map(|(_, text)| Parts::ClozeLine(text))
+        .map(|(_, text)| Parts::ClozeLine(text.trim()))
 }
 pub fn parse_comment<'a>() -> impl Parser<'a, Parts<'a>> {
     literal("//")
