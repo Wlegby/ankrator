@@ -84,8 +84,14 @@ fn traverse<'a>(
 
 #[derive(Debug, Clone, Copy)]
 enum CardType<'a> {
-    Cloze { text: &'a str },
-    Basic { front: &'a str, back: &'a str },
+    Cloze {
+        text: &'a str,
+    },
+    Basic {
+        front: &'a str,
+        back: &'a str,
+        reversed: bool,
+    },
 }
 impl<'a> Default for CardType<'a> {
     fn default() -> Self {
@@ -218,11 +224,20 @@ async fn handle_parts<'a>(
                 tags = t.clone();
             }
             Parts::CardType(ctype) => match ctype {
+                Types::BasicRev => {
+                    new_file.push_str(&format!("# Basic Rev\n"));
+                    card_type = CardType::Basic {
+                        front: "",
+                        back: "",
+                        reversed: true,
+                    }
+                }
                 Types::Basic => {
                     new_file.push_str(&format!("# Basic\n"));
                     card_type = CardType::Basic {
                         front: "",
                         back: "",
+                        reversed: false,
                     }
                 }
                 Types::Cloze => {
@@ -232,7 +247,11 @@ async fn handle_parts<'a>(
                 Types::Unknown => return Err("Failed to parse card type".into()),
             },
             Parts::Front(cfront) => match &mut card_type {
-                CardType::Basic { front, back: _ } => {
+                CardType::Basic {
+                    front,
+                    back: _,
+                    reversed: _,
+                } => {
                     *front = cfront;
                     new_file.push_str(&format!("Front: {}\n", front));
                 }
@@ -241,7 +260,11 @@ async fn handle_parts<'a>(
                 }
             },
             Parts::Back(cback) => match &mut card_type {
-                CardType::Basic { front: _, back } => {
+                CardType::Basic {
+                    front: _,
+                    back,
+                    reversed: _,
+                } => {
                     *back = cback;
                     new_file.push_str(&format!("Back: {}\n", back));
                 }
@@ -250,9 +273,11 @@ async fn handle_parts<'a>(
                 }
             },
             Parts::ClozeLine(line) => match &mut card_type {
-                CardType::Basic { front, back } => {
-                    return Err(format!("Expected basic style card ({} & {})", front, back).into())
-                }
+                CardType::Basic {
+                    front,
+                    back,
+                    reversed: _,
+                } => return Err(format!("Expected cloze style card ({} & {})", front, back).into()),
                 CardType::Cloze { text } => {
                     *text = line;
                     new_file.push_str(&format!("Cloze: {}\n", text));
@@ -282,7 +307,11 @@ async fn handle_parts<'a>(
                         );
                         "Cloze".to_string()
                     }
-                    CardType::Basic { front, back } => {
+                    CardType::Basic {
+                        front,
+                        back,
+                        reversed,
+                    } => {
                         let front_uploaded = upload_media(client, front).await?;
                         let back_uploaded = upload_media(client, back).await?;
                         fields.insert(
@@ -293,7 +322,11 @@ async fn handle_parts<'a>(
                             "Back".to_string(),
                             markdown_to_anki_with_typst(&back_uploaded),
                         );
-                        "Basic".to_string()
+                        if reversed {
+                            "Basic (and reversed card)".to_string()
+                        } else {
+                            "Basic".to_string()
+                        }
                     }
                 };
 

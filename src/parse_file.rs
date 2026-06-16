@@ -14,6 +14,7 @@ pub enum Parts<'a> {
 
 #[derive(Debug, Clone, Copy)]
 pub enum Types {
+    BasicRev,
     Basic,
     Cloze,
     Unknown,
@@ -49,6 +50,7 @@ pub fn parse_card_type<'a>() -> impl Parser<'a, Parts<'a>> {
         .and(take_until(|c| c == '\n' || c == '\r'))
         .map(|(_, ctype)| {
             let _type = match ctype.to_lowercase().as_str() {
+                "basic rev" => Types::BasicRev,
                 "basic" => Types::Basic,
                 "cloze" => Types::Cloze,
                 _ => Types::Unknown,
