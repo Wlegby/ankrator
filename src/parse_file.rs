@@ -1,4 +1,4 @@
-use rparse::{literal, split_at, take_until, take_while, Parser};
+use rparse::{literal, split_at, split_until, take_until, take_while, Parser};
 
 #[derive(Debug, Clone)]
 pub enum Parts<'a> {
@@ -60,19 +60,19 @@ pub fn parse_card_type<'a>() -> impl Parser<'a, Parts<'a>> {
 }
 pub fn parse_front<'a>() -> impl Parser<'a, Parts<'a>> {
     literal("Front: ")
-        .and(split_at("Back:"))
+        .and(split_until("Back:"))
         .map(|(_, text)| Parts::Front(text.trim()))
 }
 
 pub fn parse_back<'a>() -> impl Parser<'a, Parts<'a>> {
     literal("Back: ")
-        .and(split_at("---"))
+        .and(split_until("---"))
         .map(|(_, text)| Parts::Back(text.trim()))
 }
 
 pub fn parse_cloze<'a>() -> impl Parser<'a, Parts<'a>> {
     literal("Cloze: ")
-        .and(split_at("---"))
+        .and(split_until("---"))
         .map(|(_, text)| Parts::ClozeLine(text.trim()))
 }
 pub fn parse_comment<'a>() -> impl Parser<'a, Parts<'a>> {
@@ -105,7 +105,9 @@ pub fn parse_file<'a>(mut input: &'a str) -> Result<Vec<Parts<'a>>, &'a str> {
                 parts.push(part);
                 input = rest.trim();
             }
-            Err(i) => return Err(i),
+            Err(e) => {
+                return Err(e);
+            }
         }
     }
 
