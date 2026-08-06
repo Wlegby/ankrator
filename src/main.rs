@@ -148,10 +148,7 @@ fn file_changed<'a>(path: &str) -> Result<bool, Box<dyn std::error::Error>> {
 
         let last_time = match map.get(path) {
             Some(last_time) => *last_time,
-            None => {
-                SystemTime::now();
-                return Ok(false);
-            }
+            None => return Ok(true),
         };
 
         let metadata = fs::metadata(path)?;
