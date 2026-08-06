@@ -9,6 +9,7 @@ use std::fs::{self, File};
 use std::io::BufWriter;
 use std::path::Path;
 use std::time::SystemTime;
+use tokio::time;
 
 mod parse_file;
 use parse_file::parse_file;
@@ -74,6 +75,7 @@ fn traverse<'a>(
                         Ok(_) => *num += 1,
                         Err(e) => eprintln!("Failed to handle file:\n{}", e),
                     }
+                    time::sleep(time::Duration::from_millis(50)).await;
                 }
             }
         }
