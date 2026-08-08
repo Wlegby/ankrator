@@ -69,10 +69,11 @@ fn traverse<'a>(
                         path.to_string_lossy().to_string(),
                         &client,
                         no_cache,
+                        num,
                     )
                     .await
                     {
-                        Ok(_) => *num += 1,
+                        Ok(_) => {}
                         Err(e) => eprintln!("Failed to handle file:\n{}", e),
                     }
                     time::sleep(time::Duration::from_millis(50)).await;
@@ -106,6 +107,7 @@ async fn handle_file<'a>(
     path: String,
     client: &AnkiClient,
     no_cache: bool,
+    num: &'a mut u32,
 ) -> Result<(), Box<dyn std::error::Error>> {
     if !no_cache {
         match file_changed(&path) {
@@ -120,6 +122,8 @@ async fn handle_file<'a>(
             ),
         }
     }
+
+    *num += 1;
 
     let mut parsed_file = parse_file(content)?;
 
