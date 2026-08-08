@@ -57,7 +57,7 @@ fn traverse<'a>(
                 let entry = entry?;
                 let path = entry.path();
 
-                if path.is_dir() {
+                if path.is_dir() && path.file_name().and_then(|n| n.to_str()) != Some("artikel") {
                     traverse(client, &path, no_cache, num).await?;
                 } else if let Some(ex) = path.extension() {
                     if ex != "ak" {
