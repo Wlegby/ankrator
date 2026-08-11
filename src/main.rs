@@ -198,6 +198,58 @@ fn add_cache(path: &str) -> Result<(), Box<dyn std::error::Error>> {
     }
 }
 
+/// Helper to serialize any remaining `Parts` back to `.ak` syntax without modifying IDs.
+/// Used during error recovery so the remainder of the file isn't truncated.
+fn append_part_fallback(new_file: &mut String, part: &Parts) {
+    match part {
+        Parts::DeckName(name) => {
+            new_file.push_str(&format!("@deck {}\n", name));
+        }
+        Parts::Tags(t) => {
+            new_file.push_str("@tags ");
+            for (i, tag) in t.iter().enumerate() {
+                new_file.push_str(tag);
+                if i < t.len() - 1 {
+                    new_file.push_str(", ");
+                } else {
+                    new_file.push_str("\n\n");
+                }
+            }
+            if t.is_empty() {
+                new_file.push_str("\n\n");
+            }
+        }
+        Parts::CardType(ctype) => match ctype {
+            Types::BasicRev => new_file.push_str("# Basic Rev\n"),
+            Types::Basic => new_file.push_str("# Basic\n"),
+            Types::Cloze => new_file.push_str("# Cloze\n"),
+            Types::Unknown => {}
+        },
+        Parts::Front(cfront) => {
+            new_file.push_str(&format!("Front: {}\n", cfront));
+        }
+        Parts::Back(cback) => {
+            new_file.push_str(&format!("Back: {}\n", cback));
+        }
+        Parts::ClozeLine(line) => {
+            new_file.push_str(&format!("Cloze: {}\n", line));
+        }
+        Parts::CardEnd(cid) => {
+            if let Some(id) = cid {
+                new_file.push_str(&format!("---NoteID:{}\n\n", id));
+            } else {
+                new_file.push_str("\n");
+            }
+        }
+        Parts::Comment(c) => {
+            new_file.push_str(&format!("//{}\n", c));
+        }
+        Parts::Fast(fast) => {
+            new_file.push_str(&format!("@startfast\n\n{}\n@endfast", fast));
+        }
+    }
+}
+
 async fn handle_parts<'a>(
     parsed_file: &mut Vec<Parts<'a>>,
     path: String,
@@ -207,172 +259,201 @@ async fn handle_parts<'a>(
     let mut tags: Vec<&str> = Vec::new();
     let mut card_type = CardType::Cloze { text: "" };
 
-    let mut new_file = String::new();
     let mut num_cards = 0;
+    let mut new_file = String::new();
 
-    for part in parsed_file.iter_mut() {
-        match part {
-            Parts::DeckName(name) => {
-                new_file.push_str(&format!("@deck {}\n", name));
-                deck = name;
-            }
-            Parts::Tags(t) => {
-                new_file.push_str(&format!("@tags "));
-                for (i, tag) in t.iter().enumerate() {
-                    new_file.push_str(&format!("{}", tag));
-                    if i < t.len() - 1 {
-                        new_file.push_str(&format!(", "));
-                    } else {
-                        new_file.push_str("\n\n");
-                    }
+    for (idx, part) in parsed_file.iter().enumerate() {
+        let res: Result<(), Box<dyn std::error::Error>> = async {
+            match part {
+                Parts::DeckName(name) => {
+                    new_file.push_str(&format!("@deck {}\n", name));
+                    deck = name;
                 }
+                Parts::Tags(t) => {
+                    new_file.push_str("@tags ");
+                    for (i, tag) in t.iter().enumerate() {
+                        new_file.push_str(tag);
+                        if i < t.len() - 1 {
+                            new_file.push_str(", ");
+                        } else {
+                            new_file.push_str("\n\n");
+                        }
+                    }
 
-                tags = t.clone();
-            }
-            Parts::CardType(ctype) => match ctype {
-                Types::BasicRev => {
-                    new_file.push_str(&format!("# Basic Rev\n"));
-                    card_type = CardType::Basic {
-                        front: "",
-                        back: "",
-                        reversed: true,
-                    }
+                    tags = t.clone();
                 }
-                Types::Basic => {
-                    new_file.push_str(&format!("# Basic\n"));
-                    card_type = CardType::Basic {
-                        front: "",
-                        back: "",
-                        reversed: false,
-                    }
-                }
-                Types::Cloze => {
-                    new_file.push_str(&format!("# Cloze\n"));
-                    card_type = CardType::Cloze { text: "" }
-                }
-                Types::Unknown => return Err("Failed to parse card type".into()),
-            },
-            Parts::Front(cfront) => match &mut card_type {
-                CardType::Basic {
-                    front,
-                    back: _,
-                    reversed: _,
-                } => {
-                    *front = cfront;
-                    new_file.push_str(&format!("Front: {}\n", front));
-                }
-                CardType::Cloze { text } => {
-                    return Err(format!("Expected basic style card ({})", text).into());
-                }
-            },
-            Parts::Back(cback) => match &mut card_type {
-                CardType::Basic {
-                    front: _,
-                    back,
-                    reversed: _,
-                } => {
-                    *back = cback;
-                    new_file.push_str(&format!("Back: {}\n", back));
-                }
-                CardType::Cloze { text } => {
-                    return Err(format!("Expected basic style card ({})", text).into())
-                }
-            },
-            Parts::ClozeLine(line) => match &mut card_type {
-                CardType::Basic {
-                    front,
-                    back,
-                    reversed: _,
-                } => return Err(format!("Expected cloze style card ({} & {})", front, back).into()),
-                CardType::Cloze { text } => {
-                    *text = line;
-                    new_file.push_str(&format!("Cloze: {}\n", text));
-                }
-            },
-            Parts::CardEnd(cid) => {
-                num_cards += 1;
-                let id = match cid {
-                    Some(i) => {
-                        new_file.push_str(&format!("---NoteID:{}\n\n", i));
-                        let parsed = match i.trim().parse::<i64>() {
-                            Ok(i) => i,
-                            Err(e) => return Err(e.into()),
+                Parts::CardType(ctype) => match ctype {
+                    Types::BasicRev => {
+                        new_file.push_str("# Basic Rev\n");
+                        card_type = CardType::Basic {
+                            front: "",
+                            back: "",
+                            reversed: true,
                         };
-                        Some(parsed)
                     }
-                    None => None,
-                };
-
-                let mut fields = HashMap::new();
-                let model_name = match card_type {
+                    Types::Basic => {
+                        new_file.push_str("# Basic\n");
+                        card_type = CardType::Basic {
+                            front: "",
+                            back: "",
+                            reversed: false,
+                        };
+                    }
+                    Types::Cloze => {
+                        new_file.push_str("# Cloze\n");
+                        card_type = CardType::Cloze { text: "" };
+                    }
+                    Types::Unknown => return Err("Failed to parse card type".into()),
+                },
+                Parts::Front(cfront) => match &mut card_type {
+                    CardType::Basic {
+                        front,
+                        back: _,
+                        reversed: _,
+                    } => {
+                        *front = cfront;
+                        new_file.push_str(&format!("Front: {}\n", front));
+                    }
                     CardType::Cloze { text } => {
-                        let after_media_upload = upload_media(client, text).await?;
-                        let _ = fields.insert(
-                            "Text".to_string(),
-                            markdown_to_anki_with_typst(&format_cloze(&after_media_upload)),
-                        );
-                        "Cloze".to_string()
+                        return Err(format!("Expected basic style card ({})", text).into());
                     }
+                },
+                Parts::Back(cback) => match &mut card_type {
+                    CardType::Basic {
+                        front: _,
+                        back,
+                        reversed: _,
+                    } => {
+                        *back = cback;
+                        new_file.push_str(&format!("Back: {}\n", back));
+                    }
+                    CardType::Cloze { text } => {
+                        return Err(format!("Expected basic style card ({})", text).into());
+                    }
+                },
+                Parts::ClozeLine(line) => match &mut card_type {
                     CardType::Basic {
                         front,
                         back,
-                        reversed,
+                        reversed: _,
                     } => {
-                        let front_uploaded = upload_media(client, front).await?;
-                        let back_uploaded = upload_media(client, back).await?;
-                        fields.insert(
-                            "Front".to_string(),
-                            markdown_to_anki_with_typst(&front_uploaded),
-                        );
-                        fields.insert(
-                            "Back".to_string(),
-                            markdown_to_anki_with_typst(&back_uploaded),
-                        );
-                        if reversed {
-                            "Basic (and reversed card)".to_string()
-                        } else {
-                            "Basic".to_string()
-                        }
+                        return Err(
+                            format!("Expected cloze style card ({} & {})", front, back).into()
+                        )
                     }
-                };
-
-                //ensure deck exists
-                let _ = client.decks().create_deck(deck).await?;
-
-                if let Some(id) = id {
-                    let update = NoteUpdate {
-                        id,
-                        fields: Some(&fields),
-                        tags: Some(&tags.iter().map(|t| t.to_string()).collect::<Vec<String>>()),
+                    CardType::Cloze { text } => {
+                        *text = line;
+                        new_file.push_str(&format!("Cloze: {}\n", text));
+                    }
+                },
+                Parts::CardEnd(cid) => {
+                    num_cards += 1;
+                    let id = match cid {
+                        Some(i) => {
+                            let parsed = match i.trim().parse::<i64>() {
+                                Ok(i) => i,
+                                Err(e) => return Err(e.into()),
+                            };
+                            Some(parsed)
+                        }
+                        None => None,
                     };
 
-                    client.notes().update_note(&update).await?;
-                    client.notes().update_note_deck(id, deck).await?;
+                    let mut fields = HashMap::new();
+                    let model_name = match card_type {
+                        CardType::Cloze { text } => {
+                            let after_media_upload = upload_media(client, text).await?;
+                            let _ = fields.insert(
+                                "Text".to_string(),
+                                markdown_to_anki_with_typst(&format_cloze(&after_media_upload)),
+                            );
+                            "Cloze".to_string()
+                        }
+                        CardType::Basic {
+                            front,
+                            back,
+                            reversed,
+                        } => {
+                            let front_uploaded = upload_media(client, front).await?;
+                            let back_uploaded = upload_media(client, back).await?;
+                            fields.insert(
+                                "Front".to_string(),
+                                markdown_to_anki_with_typst(&front_uploaded),
+                            );
+                            fields.insert(
+                                "Back".to_string(),
+                                markdown_to_anki_with_typst(&back_uploaded),
+                            );
+                            if reversed {
+                                "Basic (and reversed card)".to_string()
+                            } else {
+                                "Basic".to_string()
+                            }
+                        }
+                    };
 
-                    continue;
+                    // ensure deck exists
+                    let _ = client.decks().create_deck(deck).await?;
+
+                    if let Some(id) = id {
+                        let update = NoteUpdate {
+                            id,
+                            fields: Some(&fields),
+                            tags: Some(
+                                &tags.iter().map(|t| t.to_string()).collect::<Vec<String>>(),
+                            ),
+                        };
+
+                        client.notes().update_note(&update).await?;
+                        client.notes().update_note_deck(id, deck).await?;
+
+                        new_file.push_str(&format!("---NoteID:{}\n\n", id));
+                        card_type = CardType::default();
+                        return Ok(());
+                    }
+
+                    let note = Note {
+                        deck_name: deck.to_string(),
+                        model_name,
+                        fields,
+                        tags: tags.iter().map(|t| t.to_string()).collect(),
+                    };
+
+                    let id = client.notes().add_note(&note).await?;
+
+                    new_file.push_str(&format!("---NoteID:{}\n\n", id));
+                    card_type = CardType::default();
                 }
-
-                let note = Note {
-                    deck_name: deck.to_string(),
-                    model_name,
-                    fields,
-                    tags: tags.iter().map(|t| t.to_string()).collect(),
-                };
-
-                let id = client
-                    .notes()
-                    .add_note(&note)
-                    .await
-                    .expect(&format!("Expected card not to exist {:?}", note));
-
-                new_file.push_str(&format!("---NoteID:{}\n\n", id));
-                card_type = CardType::default();
+                Parts::Comment(c) => {
+                    new_file.push_str(&format!("//{}\n", c));
+                }
+                Parts::Fast(fast) => {
+                    new_file.push_str(&format!("@startfast\n\n{}\n@endfast", fast));
+                }
             }
-            Parts::Comment(c) => {
-                new_file.push_str(&format!("//{}\n", c));
+            Ok(())
+        }
+        .await;
+
+        // Catch any error during processing of this item
+        if let Err(e) = res {
+            eprintln!(
+                "Error occurred while processing file '{}': {}. Saving already generated Note IDs...",
+                path, e
+            );
+
+            // Append the fallback representation for the item that failed
+            // plus all remaining unprocessed cards so we don't lose the rest of the file.
+            for remaining_part in &parsed_file[idx..] {
+                append_part_fallback(&mut new_file, remaining_part);
             }
 
-            Parts::Fast(fast) => new_file.push_str(&format!("@startfast\n\n{}\n@endfast", fast)),
+            if let Err(write_err) = fs::write(&path, &new_file) {
+                eprintln!("Failed to save recovery file to {}: {}", path, write_err);
+            }
+
+            // Return the error so traverse knows this file failed
+            return Err(e);
         }
     }
 
