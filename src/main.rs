@@ -238,7 +238,7 @@ fn append_part_fallback(new_file: &mut String, part: &Parts) {
             if let Some(id) = cid {
                 new_file.push_str(&format!("---NoteID:{}\n\n", id));
             } else {
-                new_file.push_str("\n");
+                new_file.push_str("---\n");
             }
         }
         Parts::Comment(c) => {
