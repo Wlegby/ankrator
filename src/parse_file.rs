@@ -1,4 +1,4 @@
-use rparse::{literal, split_at, split_until, take_until, take_while, Parser};
+use rparse::{delimited, literal, split_at, split_until, take_until, take_while, Parser};
 
 #[derive(Debug, Clone)]
 pub enum Parts<'a> {
@@ -10,6 +10,7 @@ pub enum Parts<'a> {
     ClozeLine(&'a str),
     CardEnd(Option<&'a str>),
     Comment(&'a str),
+    Fast(&'a str),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -18,6 +19,10 @@ pub enum Types {
     Basic,
     Cloze,
     Unknown,
+}
+
+pub fn parse_fast<'a>() -> impl Parser<'a, Parts<'a>> {
+    delimited("@startfast", "@endfast").map(|inbetween| Parts::Fast(inbetween))
 }
 
 pub fn parse_deck<'a>() -> impl Parser<'a, Parts<'a>> {
@@ -84,7 +89,8 @@ pub fn parse_comment<'a>() -> impl Parser<'a, Parts<'a>> {
 pub fn parse_file<'a>(mut input: &'a str) -> Result<Vec<Parts<'a>>, &'a str> {
     let mut parts = Vec::new();
 
-    let parts_parser = parse_deck()
+    let parts_parser = parse_fast()
+        .or(parse_deck())
         .or(parse_tags())
         .or(parse_card_type())
         .or(parse_front())
@@ -100,6 +106,7 @@ pub fn parse_file<'a>(mut input: &'a str) -> Result<Vec<Parts<'a>>, &'a str> {
             Ok(_) => input = input.trim(),
             Err(_) => {}
         }
+
         match parts_parser.parse(input) {
             Ok((rest, part)) => {
                 parts.push(part);

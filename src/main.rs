@@ -359,13 +359,20 @@ async fn handle_parts<'a>(
                     tags: tags.iter().map(|t| t.to_string()).collect(),
                 };
 
-                let id = client.notes().add_note(&note).await?;
+                let id = client
+                    .notes()
+                    .add_note(&note)
+                    .await
+                    .expect(&format!("Expected card not to exist {:?}", note));
+
                 new_file.push_str(&format!("---NoteID:{}\n\n", id));
                 card_type = CardType::default();
             }
             Parts::Comment(c) => {
                 new_file.push_str(&format!("//{}\n", c));
             }
+
+            Parts::Fast(fast) => new_file.push_str(&format!("@startfast\n\n{}\n@endfast", fast)),
         }
     }
 
