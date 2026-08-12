@@ -238,7 +238,7 @@ fn append_part_fallback(new_file: &mut String, part: &Parts) {
             if let Some(id) = cid {
                 new_file.push_str(&format!("---NoteID:{}\n\n", id));
             } else {
-                new_file.push_str("---\n");
+                new_file.push_str("---\n\n");
             }
         }
         Parts::Comment(c) => {
@@ -444,6 +444,7 @@ async fn handle_parts<'a>(
 
             // Append the fallback representation for the item that failed
             // plus all remaining unprocessed cards so we don't lose the rest of the file.
+            new_file.push_str("// Failed right above\n\n");
             for remaining_part in &parsed_file[idx..] {
                 append_part_fallback(&mut new_file, remaining_part);
             }
