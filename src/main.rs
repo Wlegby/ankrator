@@ -12,34 +12,41 @@ use std::time::SystemTime;
 use tokio::time;
 
 mod parse_file;
-use parse_file::parse_file;
-
 use crate::parse_file::{Parts, Types};
+use parse_file::parse_file;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client = AnkiClient::default();
     let mut args = args();
-    args.next();
+    args.next(); // Skip executable name
 
     let mut ignore_cache = false;
-    match args.next() {
-        Some(s) => {
-            if &s == "--no-cache" {
-                ignore_cache = true;
-            } else {
-                eprintln!(
-                    "Invalid argument {}\nonly --no-cache valid\n(continuing)",
-                    s
-                )
-            }
+    let mut add_only = false;
+
+    // Process all command line arguments
+    while let Some(s) = args.next() {
+        if s == "--no-cache" {
+            ignore_cache = true;
+        } else if s == "--add-only" || s == "add" {
+            add_only = true;
+        } else {
+            eprintln!(
+                "Invalid argument {}\nValid flags: --no-cache, --add-only\n(continuing)",
+                s
+            )
         }
-        None => {}
     }
 
     let mut num_files = 0;
-
-    traverse(&client, Path::new("."), ignore_cache, &mut num_files).await?;
+    traverse(
+        &client,
+        Path::new("."),
+        ignore_cache,
+        add_only,
+        &mut num_files,
+    )
+    .await?;
 
     println!("Successfully handled {} file(s)", num_files);
     Ok(())
@@ -49,6 +56,7 @@ fn traverse<'a>(
     client: &'a AnkiClient,
     path: &'a Path,
     no_cache: bool,
+    add_only: bool,
     num: &'a mut u32,
 ) -> BoxFuture<'a, Result<(), Box<dyn std::error::Error>>> {
     async move {
@@ -56,9 +64,8 @@ fn traverse<'a>(
             for entry in fs::read_dir(path)? {
                 let entry = entry?;
                 let path = entry.path();
-
                 if path.is_dir() && path.file_name().and_then(|n| n.to_str()) != Some("artikel") {
-                    traverse(client, &path, no_cache, num).await?;
+                    traverse(client, &path, no_cache, add_only, num).await?;
                 } else if let Some(ex) = path.extension() {
                     if ex != "ak" {
                         continue;
@@ -69,6 +76,7 @@ fn traverse<'a>(
                         path.to_string_lossy().to_string(),
                         &client,
                         no_cache,
+                        add_only,
                         num,
                     )
                     .await
@@ -96,6 +104,7 @@ enum CardType<'a> {
         reversed: bool,
     },
 }
+
 impl<'a> Default for CardType<'a> {
     fn default() -> Self {
         Self::Cloze { text: "" }
@@ -107,6 +116,7 @@ async fn handle_file<'a>(
     path: String,
     client: &AnkiClient,
     no_cache: bool,
+    add_only: bool,
     num: &'a mut u32,
 ) -> Result<(), Box<dyn std::error::Error>> {
     if !no_cache {
@@ -122,17 +132,12 @@ async fn handle_file<'a>(
             ),
         }
     }
-
     *num += 1;
-
     let mut parsed_file = parse_file(content)?;
-
     if parsed_file.is_empty() {
         eprint!("File does not contain ankrator items");
     }
-
-    handle_parts(&mut parsed_file, path, client).await?;
-
+    handle_parts(&mut parsed_file, path, client, add_only).await?;
     Ok(())
 }
 
@@ -141,23 +146,17 @@ fn file_changed<'a>(path: &str) -> Result<bool, Box<dyn std::error::Error>> {
         dir = dir.join("ankrator");
         fs::create_dir_all(&dir)?;
         dir = dir.join("cache.json");
-
         if !dir.exists() {
             fs::write(&dir, "{}")?;
         }
-
         let cache = fs::read_to_string(&dir)?;
-
         let map: HashMap<String, SystemTime> = serde_json::from_str(&cache)?;
-
         let last_time = match map.get(path) {
             Some(last_time) => *last_time,
             None => return Ok(true),
         };
-
         let metadata = fs::metadata(path)?;
         let modified_time: SystemTime = metadata.modified().unwrap();
-
         Ok(modified_time > last_time)
     } else {
         eprint!("Failed to get cache dir");
@@ -170,15 +169,11 @@ fn add_cache(path: &str) -> Result<(), Box<dyn std::error::Error>> {
         dir = dir.join("ankrator");
         fs::create_dir_all(&dir)?;
         dir = dir.join("cache.json");
-
         if !dir.exists() {
             fs::write(&dir, "{}")?;
         }
-
         let cache = fs::read_to_string(&dir)?;
-
         let mut map: HashMap<String, SystemTime> = serde_json::from_str(&cache)?;
-
         match map.get_mut(path) {
             Some(last_time) => {
                 *last_time = SystemTime::now();
@@ -187,19 +182,15 @@ fn add_cache(path: &str) -> Result<(), Box<dyn std::error::Error>> {
                 map.insert(path.to_string(), SystemTime::now());
             }
         }
-
         let file = File::create(&dir)?;
         let writer = BufWriter::new(file);
         serde_json::to_writer_pretty(writer, &map)?;
-
         Ok(())
     } else {
         Err("Failed to get cache dir".into())
     }
 }
 
-/// Helper to serialize any remaining `Parts` back to `.ak` syntax without modifying IDs.
-/// Used during error recovery so the remainder of the file isn't truncated.
 fn append_part_fallback(new_file: &mut String, part: &Parts) {
     match part {
         Parts::DeckName(name) => {
@@ -254,11 +245,11 @@ async fn handle_parts<'a>(
     parsed_file: &mut Vec<Parts<'a>>,
     path: String,
     client: &AnkiClient,
+    add_only: bool, // NEW: Added flag to handle_parts
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut deck = "Default";
     let mut tags: Vec<&str> = Vec::new();
     let mut card_type = CardType::Cloze { text: "" };
-
     let mut num_cards = 0;
     let mut new_file = String::new();
 
@@ -279,7 +270,6 @@ async fn handle_parts<'a>(
                             new_file.push_str("\n\n");
                         }
                     }
-
                     tags = t.clone();
                 }
                 Parts::CardType(ctype) => match ctype {
@@ -359,6 +349,13 @@ async fn handle_parts<'a>(
                         None => None,
                     };
 
+                    // NEW: If we are in add_only mode and the card has an ID, skip processing it
+                    if add_only && id.is_some() {
+                        new_file.push_str(&format!("---NoteID:{}\n\n", id.unwrap()));
+                        card_type = CardType::default();
+                        return Ok(());
+                    }
+
                     let mut fields = HashMap::new();
                     let model_name = match card_type {
                         CardType::Cloze { text } => {
@@ -403,10 +400,8 @@ async fn handle_parts<'a>(
                                 &tags.iter().map(|t| t.to_string()).collect::<Vec<String>>(),
                             ),
                         };
-
                         client.notes().update_note(&update).await?;
                         client.notes().update_note_deck(id, deck).await?;
-
                         new_file.push_str(&format!("---NoteID:{}\n\n", id));
                         card_type = CardType::default();
                         return Ok(());
@@ -420,7 +415,6 @@ async fn handle_parts<'a>(
                     };
 
                     let id = client.notes().add_note(&note).await?;
-
                     new_file.push_str(&format!("---NoteID:{}\n\n", id));
                     card_type = CardType::default();
                 }
@@ -435,25 +429,18 @@ async fn handle_parts<'a>(
         }
         .await;
 
-        // Catch any error during processing of this item
         if let Err(e) = res {
             eprintln!(
                 "Error occurred while processing file '{}': {}. Saving already generated Note IDs...",
                 path, e
             );
-
-            // Append the fallback representation for the item that failed
-            // plus all remaining unprocessed cards so we don't lose the rest of the file.
             new_file.push_str("// Failed right here\n\n");
             for remaining_part in &parsed_file[idx..] {
                 append_part_fallback(&mut new_file, remaining_part);
             }
-
             if let Err(write_err) = fs::write(&path, &new_file) {
                 eprintln!("Failed to save recovery file to {}: {}", path, write_err);
             }
-
-            // Return the error so traverse knows this file failed
             return Err(e);
         }
     }
