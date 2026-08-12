@@ -444,7 +444,7 @@ async fn handle_parts<'a>(
 
             // Append the fallback representation for the item that failed
             // plus all remaining unprocessed cards so we don't lose the rest of the file.
-            new_file.push_str("// Failed right above\n\n");
+            new_file.push_str("// Failed right here\n\n");
             for remaining_part in &parsed_file[idx..] {
                 append_part_fallback(&mut new_file, remaining_part);
             }
