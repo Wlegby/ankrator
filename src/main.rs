@@ -3,9 +3,11 @@ use anker::notes::{format_cloze, Note, NoteUpdate};
 use anker::AnkiClient;
 use futures::future::BoxFuture;
 use futures::FutureExt;
+use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
 use std::env::args;
 use std::fs::{self, File};
+use std::hash::{Hash, Hasher};
 use std::io::BufWriter;
 use std::path::Path;
 use std::time::SystemTime;
@@ -19,12 +21,11 @@ use parse_file::parse_file;
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client = AnkiClient::default();
     let mut args = args();
-    args.next(); // Skip executable name
+    args.next();
 
     let mut ignore_cache = false;
     let mut add_only = false;
 
-    // Process all command line arguments
     while let Some(s) = args.next() {
         if s == "--no-cache" {
             ignore_cache = true;
@@ -191,6 +192,34 @@ fn add_cache(path: &str) -> Result<(), Box<dyn std::error::Error>> {
     }
 }
 
+// NEW: Functions to manage a per-card content cache
+fn get_card_cache() -> HashMap<i64, u64> {
+    if let Some(mut dir) = dirs::cache_dir() {
+        dir = dir.join("ankrator");
+        let cache_file = dir.join("card_cache.json");
+        if cache_file.exists() {
+            if let Ok(content) = fs::read_to_string(&cache_file) {
+                if let Ok(map) = serde_json::from_str(&content) {
+                    return map;
+                }
+            }
+        }
+    }
+    HashMap::new()
+}
+
+fn save_card_cache(cache: &HashMap<i64, u64>) {
+    if let Some(mut dir) = dirs::cache_dir() {
+        dir = dir.join("ankrator");
+        let _ = fs::create_dir_all(&dir);
+        let cache_file = dir.join("card_cache.json");
+        if let Ok(file) = File::create(cache_file) {
+            let writer = BufWriter::new(file);
+            let _ = serde_json::to_writer_pretty(writer, cache);
+        }
+    }
+}
+
 fn append_part_fallback(new_file: &mut String, part: &Parts) {
     match part {
         Parts::DeckName(name) => {
@@ -245,13 +274,16 @@ async fn handle_parts<'a>(
     parsed_file: &mut Vec<Parts<'a>>,
     path: String,
     client: &AnkiClient,
-    add_only: bool, // NEW: Added flag to handle_parts
+    add_only: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut deck = "Default";
     let mut tags: Vec<&str> = Vec::new();
     let mut card_type = CardType::Cloze { text: "" };
     let mut num_cards = 0;
     let mut new_file = String::new();
+
+    // NEW: Load our card cache into memory
+    let mut card_cache = get_card_cache();
 
     for (idx, part) in parsed_file.iter().enumerate() {
         let res: Result<(), Box<dyn std::error::Error>> = async {
@@ -349,11 +381,39 @@ async fn handle_parts<'a>(
                         None => None,
                     };
 
-                    // NEW: If we are in add_only mode and the card has an ID, skip processing it
                     if add_only && id.is_some() {
                         new_file.push_str(&format!("---NoteID:{}\n\n", id.unwrap()));
                         card_type = CardType::default();
                         return Ok(());
+                    }
+
+                    // NEW: Hash the contents of the current card to see if it changed
+                    let mut hasher = DefaultHasher::new();
+                    deck.hash(&mut hasher);
+                    tags.hash(&mut hasher);
+                    match card_type {
+                        CardType::Cloze { text } => text.hash(&mut hasher),
+                        CardType::Basic {
+                            front,
+                            back,
+                            reversed,
+                        } => {
+                            front.hash(&mut hasher);
+                            back.hash(&mut hasher);
+                            reversed.hash(&mut hasher);
+                        }
+                    }
+                    let current_hash = hasher.finish();
+
+                    // NEW: If the card has an ID and its hash hasn't changed, skip network requests!
+                    if let Some(note_id) = id {
+                        if let Some(&saved_hash) = card_cache.get(&note_id) {
+                            if saved_hash == current_hash {
+                                new_file.push_str(&format!("---NoteID:{}\n\n", note_id));
+                                card_type = CardType::default();
+                                return Ok(()); // SKIPS API ENTIRELY
+                            }
+                        }
                     }
 
                     let mut fields = HashMap::new();
@@ -389,7 +449,6 @@ async fn handle_parts<'a>(
                         }
                     };
 
-                    // ensure deck exists
                     let _ = client.decks().create_deck(deck).await?;
 
                     if let Some(id) = id {
@@ -404,6 +463,9 @@ async fn handle_parts<'a>(
                         client.notes().update_note_deck(id, deck).await?;
                         new_file.push_str(&format!("---NoteID:{}\n\n", id));
                         card_type = CardType::default();
+
+                        // NEW: Save the new hash for this updated card
+                        card_cache.insert(id, current_hash);
                         return Ok(());
                     }
 
@@ -417,6 +479,9 @@ async fn handle_parts<'a>(
                     let id = client.notes().add_note(&note).await?;
                     new_file.push_str(&format!("---NoteID:{}\n\n", id));
                     card_type = CardType::default();
+
+                    // NEW: Save the hash for this brand new card
+                    card_cache.insert(id, current_hash);
                 }
                 Parts::Comment(c) => {
                     new_file.push_str(&format!("//{}\n", c));
@@ -441,6 +506,9 @@ async fn handle_parts<'a>(
             if let Err(write_err) = fs::write(&path, &new_file) {
                 eprintln!("Failed to save recovery file to {}: {}", path, write_err);
             }
+
+            // NEW: Make sure to save any cached hashes we successfully generated before the crash
+            save_card_cache(&card_cache);
             return Err(e);
         }
     }
@@ -450,6 +518,9 @@ async fn handle_parts<'a>(
     } else {
         add_cache(&path)?;
     }
+
+    // NEW: Save the final card cache state
+    save_card_cache(&card_cache);
 
     fs::write(&path, new_file)?;
     Ok(())
